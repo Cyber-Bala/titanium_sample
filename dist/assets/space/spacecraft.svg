@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 400" role="img" aria-label="Original exploration spacecraft, three-quarter rear view">
+  <defs>
+    <linearGradient id="hull" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#F4F7FB"/><stop offset=".55" stop-color="#C9D3DF"/><stop offset="1" stop-color="#6F7D8F"/>
+    </linearGradient>
+    <linearGradient id="hullDark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3A4658"/><stop offset="1" stop-color="#151C28"/>
+    </linearGradient>
+    <linearGradient id="trail" x1="1" y1="0" x2="0" y2="0">
+      <stop offset="0" stop-color="#39C7E8" stop-opacity=".85"/><stop offset="1" stop-color="#39C7E8" stop-opacity="0"/>
+    </linearGradient>
+    <radialGradient id="glow"><stop offset="0" stop-color="#8BD9FF"/><stop offset="1" stop-color="#39C7E8" stop-opacity="0"/></radialGradient>
+  </defs>
+  <!-- ion trail -->
+  <path d="M60 200 L250 188 L250 212 Z" fill="url(#trail)"/>
+  <ellipse cx="250" cy="200" rx="26" ry="20" fill="url(#glow)" opacity=".9"/>
+  <!-- rear wings -->
+  <path d="M270 188 L190 92 L330 150 Z" fill="url(#hullDark)"/>
+  <path d="M270 212 L190 308 L330 250 Z" fill="url(#hullDark)"/>
+  <!-- main hull -->
+  <path d="M255 170 L520 150 Q650 148 740 200 Q650 252 520 250 L255 230 Q235 200 255 170 Z" fill="url(#hull)"/>
+  <!-- upper spine -->
+  <path d="M300 168 L500 152 L560 160 L330 178 Z" fill="#fff" opacity=".55"/>
+  <!-- panel lines -->
+  <g stroke="#6F7D8F" stroke-width="1.5" fill="none" opacity=".7">
+    <path d="M360 160 L360 240"/><path d="M450 154 L450 246"/><path d="M540 152 L540 248"/>
+    <path d="M270 200 L700 200" stroke-dasharray="4 8"/>
+  </g>
+  <!-- cockpit -->
+  <path d="M600 178 Q660 172 700 196 Q660 206 600 204 Z" fill="#091321"/>
+  <path d="M615 182 Q655 178 685 195" stroke="#8BD9FF" stroke-width="2" fill="none" opacity=".8"/>
+  <!-- engine pods -->
+  <rect x="236" y="176" width="34" height="48" rx="10" fill="url(#hullDark)"/>
+  <circle cx="240" cy="200" r="9" fill="#8BD9FF"/>
+  <!-- nav lights -->
+  <circle cx="190" cy="92" r="4" fill="#39C7E8"/>
+  <circle cx="190" cy="308" r="4" fill="#F2B66D"/>
+  <circle cx="738" cy="200" r="3" fill="#8BD9FF"/>
+</svg>
