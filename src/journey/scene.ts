@@ -9,7 +9,7 @@ import { RenderPass } from "three/examples/jsm/postprocessing/RenderPass.js";
 import { UnrealBloomPass } from "three/examples/jsm/postprocessing/UnrealBloomPass.js";
 import { OutputPass } from "three/examples/jsm/postprocessing/OutputPass.js";
 import { chapters, SPACE_END, stationCenter, stationHalf } from "./chapters";
-import { AVENUE_HALF, buildCity } from "./city";
+import { AVENUE_HALF, buildCity, moodAt } from "./cityPath";
 
 export interface SceneHandle {
   setProgress(p: number): void;
@@ -232,38 +232,99 @@ export function createScene(
   shipRoot.add(trail);
   gltf.load("/assets/models/spacecraft.glb", (g) => { tame(g.scene, 0.6); shipRoot.add(g.scene); });
 
-  // ---- city route
+  // ---- world route: straight descent, then a winding road through ten different districts
   const N = chapters.length;
-  const SIDE_X = AVENUE_HALF + 16;
-  const stationZ = chapters.map((_, i) => -(130 + i * 85));
-  const zStart = 300;
-  const zEnd = stationZ[N - 1] - 90;
+  const SIDE_X = AVENUE_HALF + 24;
   const up = new THREE.Vector3(0, 1, 0);
-  const pts: THREE.Vector3[] = [
-    new THREE.Vector3(0, 340, 320), new THREE.Vector3(0, 240, 210), new THREE.Vector3(0, 120, 80),
-    new THREE.Vector3(0, 46, -10), new THREE.Vector3(0, 15, -70),
+  const STATION_GAP = 250;
+  const S_HUB = 540;
+  const cmds: (["S", number] | ["A", number, number])[] = [
+    ["S", 480], ["A", 75, 170], ["S", 50], ["A", -85, 160], ["S", 40], ["A", 95, 150], ["S", 40], ["A", -90, 160], ["S", 30],
+    ["A", 100, 150], ["S", 30], ["A", -80, 170], ["S", 40], ["A", 90, 160], ["S", 30], ["A", -100, 150], ["S", 40], ["A", 80, 170],
+    ["S", 30], ["A", -70, 170], ["S", 40], ["A", 60, 200], ["S", 320],
   ];
-  for (let i = 0; i < N; i++) pts.push(new THREE.Vector3(Math.sin(i * 1.3) * 4, 11 + Math.sin(i * 0.9 + 1) * 2.5, stationZ[i] + 20));
-  pts.push(new THREE.Vector3(0, 13, zEnd));
-  const curve = new THREE.CatmullRomCurve3(pts, false, "centripetal");
+  // 2D path samples every 18 units
+  const path2: { x: number; z: number; s: number }[] = [];
+  {
+    let x = 0, z = 320, dx = 0, dz = -1, sAcc = 0;
+    const ds = 18;
+    path2.push({ x, z, s: 0 });
+    for (const c of cmds) {
+      if (c[0] === "S") {
+        const n = Math.max(1, Math.round(c[1] / ds));
+        for (let i = 0; i < n; i++) { x += dx * ds; z += dz * ds; sAcc += ds; path2.push({ x, z, s: sAcc }); }
+      } else {
+        const ang = (c[1] * Math.PI) / 180, R = c[2];
+        const total = Math.abs(ang) * R;
+        const n = Math.max(2, Math.round(total / ds));
+        const da = ang / n;
+        for (let i = 0; i < n; i++) {
+          const rx = -dz, rz = dx; // right of heading
+          const ca = Math.cos(da), sa = Math.sin(da);
+          const ndx = dx * ca + rx * sa, ndz = dz * ca + rz * sa;
+          dx = ndx; dz = ndz;
+          const len = Math.hypot(dx, dz); dx /= len; dz /= len;
+          x += dx * (total / n); z += dz * (total / n); sAcc += total / n;
+          path2.push({ x, z, s: sAcc });
+        }
+      }
+    }
+  }
+  const stationS2 = chapters.map((_, i) => S_HUB + i * STATION_GAP);
+  const WATER = new Set([4, 9]);
+  const smoothS = (a: number, b: number, v: number) => { const t = Math.min(1, Math.max(0, (v - a) / (b - a))); return t * t * (3 - 2 * t); };
+  const roadY = (s2: number) => {
+    let y = 0;
+    for (const i of WATER) {
+      const s0 = stationS2[i] - 125, s1 = i === N - 1 ? 1e9 : stationS2[i] + 125;
+      y = Math.max(y, 17 * smoothS(s0 - 70, s0 + 70, s2) * (1 - smoothS(s1 - 70, s1 + 70, s2)));
+    }
+    return y;
+  };
+  const camAlt = (s2: number) => 11 + 330 * (1 - smoothS(0, S_HUB * 0.85, s2)) ** 1.4;
+  const road = new THREE.CatmullRomCurve3(path2.map((q) => new THREE.Vector3(q.x, roadY(q.s), q.z)), false, "centripetal");
+  const curve = new THREE.CatmullRomCurve3(path2.map((q) => new THREE.Vector3(q.x, roadY(q.s) + camAlt(q.s), q.z)), false, "centripetal");
+  const roadLen = road.getLength();
+  const roadFrame = (sDist: number) => {
+    const u = Math.min(1, Math.max(0, sDist / roadLen));
+    const P = road.getPointAt(u);
+    const T = road.getTangentAt(u);
+    T.y = 0;
+    T.normalize();
+    return { P, T, N: new THREE.Vector3().crossVectors(T, up).normalize() };
+  };
+  // convert 2D arc length -> road (3D) arc length via nearest point
+  const toRoadS = (s2: number) => {
+    let q = path2[path2.length - 1];
+    for (let i = 0; i < path2.length; i++) if (path2[i].s >= s2) { q = path2[i]; break; }
+    let bi = 0, bd = 1e9;
+    for (let k = 0; k <= 6000; k++) {
+      const pt = road.getPointAt(k / 6000);
+      const d = Math.hypot(pt.x - q.x, pt.z - q.z);
+      if (d < bd) { bd = d; bi = k; }
+    }
+    return (bi / 6000) * roadLen;
+  };
+  const stationS = stationS2.map(toRoadS);
+  const stationRoad = stationS.map((sd) => roadFrame(sd));
   const uTable: number[] = [];
   {
-    const samples = 6000;
-    const zs: number[] = [];
-    for (let k = 0; k <= samples; k++) zs.push(curve.getPointAt(k / samples).z);
-    stationZ.forEach((z) => {
+    const samples = 9000;
+    const pts2 = Array.from({ length: samples + 1 }, (_, k) => curve.getPointAt(k / samples));
+    stationRoad.forEach((fr) => {
       let bi = 0, bd = 1e9;
-      zs.forEach((zz, k) => { const d = Math.abs(zz - z); if (d < bd) { bd = d; bi = k; } });
+      pts2.forEach((q, k) => { const d = Math.hypot(q.x - fr.P.x, q.z - fr.P.z); if (d < bd) { bd = d; bi = k; } });
       uTable.push(bi / samples);
     });
   }
   const U = (i: number) => uTable[i];
   const rightAt = (u: number) => {
     const t = curve.getTangentAt(Math.min(0.999, Math.max(0.001, u)));
-    return new THREE.Vector3().crossVectors(t, up).normalize();
+    t.y = 0;
+    return new THREE.Vector3().crossVectors(t.normalize(), up).normalize();
   };
-  const plazas = chapters.map((c, i) => ({ x: c.side * SIDE_X, z: stationZ[i] }));
-  const city = buildCity({ low: opts.low, plazas, zStart, zEnd, manager });
+  const plazaPos = chapters.map((c, i) => stationRoad[i].P.clone().addScaledVector(stationRoad[i].N, c.side * SIDE_X));
+  const city = buildCity({ low: opts.low, road, stationS, plazas: plazaPos, manager });
   city.group.visible = false;
   scene.add(city.group);
 
@@ -271,8 +332,20 @@ export function createScene(
   const stationPos: THREE.Vector3[] = [];
   chapters.forEach((c, i) => {
     const group = new THREE.Group();
-    group.position.set(plazas[i].x, 0.05, plazas[i].z);
-    group.lookAt(new THREE.Vector3(0, 0.05, plazas[i].z));
+    group.position.set(plazaPos[i].x, plazaPos[i].y + 0.05, plazaPos[i].z);
+    group.lookAt(new THREE.Vector3(stationRoad[i].P.x, plazaPos[i].y + 0.05, stationRoad[i].P.z));
+    const disc = new THREE.Mesh(new THREE.CylinderGeometry(24, 24, 2.6, 48), new THREE.MeshStandardMaterial({ color: 0x4a5668, roughness: 0.7, metalness: 0.3 }));
+    disc.position.y = -1.3;
+    group.add(disc);
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(24, 0.18, 8, 64), new THREE.MeshBasicMaterial({ color: 0x66e0ff }));
+    ring.rotation.x = Math.PI / 2;
+    ring.position.y = 0.05;
+    group.add(ring);
+    if (plazaPos[i].y > 1) {
+      const pil = new THREE.Mesh(new THREE.CylinderGeometry(5, 6.5, plazaPos[i].y + 4, 16), new THREE.MeshStandardMaterial({ color: 0x3a4658, metalness: 0.6, roughness: 0.5 }));
+      pil.position.y = -2.6 - (plazaPos[i].y + 4) / 2 + 1.3;
+      group.add(pil);
+    }
     group.visible = false;
     scene.add(group);
     stationPos.push(group.position.clone());
@@ -329,7 +402,8 @@ export function createScene(
     g.scene.scale.setScalar(6.5);
     wordmark.add(g.scene);
   });
-  wordmark.position.set(0, 58, plazas[0].z - 20);
+  wordmark.position.set(plazaPos[0].x, 62 + plazaPos[0].y, plazaPos[0].z);
+  const wmLook = new THREE.Vector3(stationRoad[0].P.x, 62 + plazaPos[0].y, stationRoad[0].P.z);
   wordmark.visible = false;
   scene.add(wordmark);
 
@@ -425,6 +499,7 @@ export function createScene(
   const faceDummy = new THREE.Object3D();
   const basisQ = new THREE.Quaternion();
   const fogCity = new THREE.Fog(0x7a5f6e, 70, 760);
+  const stationRoadY = (i: number) => plazaPos[i].y;
   function routePhase(P: number, t: number) {
     const u = uOf(P);
     const uc = Math.max(0.0005, u - 0.0016);
@@ -477,7 +552,7 @@ export function createScene(
       for (const o of s.spins) o.rotation.z = t * (0.15 + (i % 3) * 0.05) * (o.name.includes("B") || o.name.includes("2") ? -1 : 1);
     });
     wordmark.visible = true;
-    wordmark.lookAt(0, wordmark.position.y, wordmark.position.z + 100);
+    wordmark.lookAt(wmLook);
     city.update(t, dtG);
 
     const nm = nebula.material as THREE.ShaderMaterial;
@@ -490,14 +565,23 @@ export function createScene(
       scene.backgroundBlurriness = 0.02;
       scene.backgroundRotation.y = 0.9;
       scene.environment = cityEnv;
-      scene.environmentIntensity = 1.0;
+      scene.environmentIntensity = moodAt(P > centres[0] ? 1 : 0).envI * 0.9;
       scene.environmentRotation.y = 0.9;
     }
     nebula.position.copy(camera.position);
     stars.visible = !cityBg;
     stars.position.copy(camera.position);
-    dir.color.setHex(0xffb98a);
-    dir.intensity = 2.3;
+    let fi = 0;
+    if (P > centres[0]) {
+      let k = 0;
+      while (k < N - 2 && P > centres[k + 1]) k++;
+      fi = Math.min(N - 1, k + Math.min(1, (P - centres[k]) / (centres[k + 1] - centres[k])));
+    }
+    const mood = moodAt(fi);
+    fogCity.color.copy(mood.fog);
+    fogCity.far = mood.fogFar;
+    dir.color.copy(mood.dir);
+    dir.intensity = mood.dirI;
     dir.position.set(-60, 35, 80);
     scene.fog = fogCity;
     earth.visible = false;

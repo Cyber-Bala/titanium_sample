@@ -100,7 +100,7 @@ function Journey({ mode, onDisable }: { mode: "full" | "lite"; onDisable: () => 
           const centre = stationCenter(i);
           const pe = panelEls.current[i];
           if (pe) {
-            const o = fade(p, [Math.max(centre - stationHalf, SPACE_END + 0.0), centre + stationHalf], 0.012);
+            const o = fade(p, [Math.max(centre - stationHalf, SPACE_END + 0.0), centre + stationHalf], 0.005);
             pe.style.opacity = String(o);
             pe.style.transform = `translateY(calc(-50% + ${(1 - o) * 24}px))`;
             pe.style.visibility = o > 0.01 ? "visible" : "hidden";
